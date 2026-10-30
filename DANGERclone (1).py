@@ -5,7 +5,9 @@ import urllib.error
 from urllib.parse import urlparse
 from pathlib import Path
 from datetime import datetime
+from getpass import getpass
 import re
+import uuid
 
 GREEN = "\033[1;32m"
 BLUE = "\033[1;34m"
@@ -20,6 +22,9 @@ OUT = BASE / "captured"
 DOWNLOADS = Path.home() / "storage" / "downloads"
 
 MAX_SIZE = 10 * 1024 * 1024
+
+BOT_TOKEN = ""
+CHAT_ID = ""
 
 
 def banner():
@@ -44,11 +49,91 @@ def banner():
 ██║     ██║  ██║██║██║ ╚═╝ ██║███████╗
 """ + RESET)
 
-    print(GREEN + "      DANGER MARUF PRIME " + RESET)
+    print(GREEN + "      LoneWolf Silent Rush" + RESET)
     print(BLUE + "=" * 38 + RESET)
     print(CYAN + "       WEBSITE HTML CAPTURER" + RESET)
     print(BLUE + "=" * 38 + RESET)
     print()
+
+
+def telegram_setup():
+    global BOT_TOKEN, CHAT_ID
+
+    print(CYAN + "\n===== TELEGRAM BOT SETUP =====" + RESET)
+
+    BOT_TOKEN = getpass("Enter Telegram Bot Token: ").strip()
+    CHAT_ID = input("Enter Telegram Chat ID: ").strip()
+
+    if not BOT_TOKEN or not CHAT_ID:
+        print(YELLOW + "[!] Telegram not configured. Upload disabled." + RESET)
+        BOT_TOKEN = ""
+        CHAT_ID = ""
+        return
+
+    print(GREEN + "[+] Telegram settings loaded for this session." + RESET)
+
+
+def telegram_send(file_path, caption):
+    if not BOT_TOKEN or not CHAT_ID:
+        print(YELLOW + "[!] Telegram upload skipped." + RESET)
+        return False
+
+    boundary = "----LoneWolf" + uuid.uuid4().hex
+
+    try:
+        with open(file_path, "rb") as file:
+            file_data = file.read()
+
+        filename = Path(file_path).name
+
+        body = bytearray()
+
+        def add_field(name, value):
+            body.extend(f"--{boundary}\r\n".encode())
+            body.extend(
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
+            )
+            body.extend(str(value).encode())
+            body.extend(b"\r\n")
+
+        add_field("chat_id", CHAT_ID)
+        add_field("caption", caption)
+
+        body.extend(f"--{boundary}\r\n".encode())
+        body.extend(
+            (
+                f'Content-Disposition: form-data; name="document"; '
+                f'filename="{filename}"\r\n'
+            ).encode()
+        )
+        body.extend(b"Content-Type: text/html\r\n\r\n")
+        body.extend(file_data)
+        body.extend(b"\r\n")
+        body.extend(f"--{boundary}--\r\n".encode())
+
+        request = urllib.request.Request(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
+            data=bytes(body),
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}"
+            },
+            method="POST"
+        )
+
+        with urllib.request.urlopen(request, timeout=40) as response:
+            result = response.read().decode("utf-8", errors="replace")
+
+        if '"ok":true' in result:
+            print(GREEN + "[+] Telegram upload successful!" + RESET)
+            return True
+
+        print(RED + "[!] Telegram rejected the upload." + RESET)
+        print(YELLOW + result[:500] + RESET)
+        return False
+
+    except Exception as e:
+        print(RED + f"[!] Telegram upload failed: {e}" + RESET)
+        return False
 
 
 def capture():
@@ -124,6 +209,12 @@ def capture():
             except OSError as e:
                 print(YELLOW + f"[!] Downloads save failed: {e}" + RESET)
 
+            print(CYAN + "\n[+] Sending HTML to Telegram..." + RESET)
+            telegram_send(
+                file_path,
+                f"Website HTML Capture\nWebsite: {response.geturl()}"
+            )
+
     except urllib.error.HTTPError as e:
         print(RED + f"[!] HTTP Error: {e.code} {e.reason}" + RESET)
 
@@ -139,6 +230,8 @@ def capture():
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+
+    telegram_setup()
 
     while True:
         banner()
